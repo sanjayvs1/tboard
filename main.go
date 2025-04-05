@@ -119,16 +119,11 @@ func createPost(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Error saving post"})
 	}
 
-	// Fetch the updated list of posts
-	var posts []Post
-	err = db.Select(&posts, "SELECT id, title, body, \"user\" FROM posts ORDER BY id DESC")
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Error fetching updated posts"})
-	}
-
-	// Return only the posts list
-	return c.Render(http.StatusOK, "posts_list.html", map[string]interface{}{
-		"Posts":       posts,
+	return c.Render(http.StatusOK, "post.html", map[string]interface{}{
+		"ID":          post.ID,
+		"Title":       post.Title,
+		"Body":        post.Body,
+		"User":        post.User,
 		"CurrentUser": post.User,
 	})
 }
@@ -162,21 +157,15 @@ func updatePost(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Error updating post"})
 	}
 
-	// Fetch the updated list of posts
-	var posts []Post
-	err = db.Select(&posts, "SELECT id, title, body, \"user\" FROM posts ORDER BY id DESC")
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Error fetching updated posts"})
-	}
-
-	// Get current user
 	ip := c.RealIP()
 	hash := sha256.Sum256([]byte(ip))
 	currentUser := hex.EncodeToString(hash[:8])
 
-	// Return only the posts list
-	return c.Render(http.StatusOK, "posts_list.html", map[string]interface{}{
-		"Posts":       posts,
+	return c.Render(http.StatusOK, "post.html", map[string]interface{}{
+		"ID":          post.ID,
+		"Title":       post.Title,
+		"Body":        post.Body,
+		"User":        post.User,
 		"CurrentUser": currentUser,
 	})
 }
@@ -190,23 +179,7 @@ func deletePost(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Error deleting post"})
 	}
 
-	// Fetch the updated list of posts
-	var posts []Post
-	err = db.Select(&posts, "SELECT id, title, body, \"user\" FROM posts ORDER BY id DESC")
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Error fetching updated posts"})
-	}
-
-	// Get current user
-	ip := c.RealIP()
-	hash := sha256.Sum256([]byte(ip))
-	currentUser := hex.EncodeToString(hash[:8])
-
-	// Return only the posts list
-	return c.Render(http.StatusOK, "posts_list.html", map[string]interface{}{
-		"Posts":       posts,
-		"CurrentUser": currentUser,
-	})
+	return c.String(http.StatusOK, "")
 }
 
 func getPost(c echo.Context) error {
