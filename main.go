@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -94,12 +93,10 @@ func LoadConfig(path string) (config Config, err error) {
 func createPost(c echo.Context) error {
 	var post Post
 
-	formData, err := c.FormParams()
+	_, err := c.FormParams()
 	if err != nil {
-		fmt.Println("Error getting form params:", err)
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid form data"})
 	}
-	fmt.Println("Raw form data:", formData)
 
 	post.Title = c.FormValue("title")
 	post.Body = c.FormValue("body")
@@ -108,31 +105,30 @@ func createPost(c echo.Context) error {
 	hash := sha256.Sum256([]byte(ip))
 	post.User = hex.EncodeToString(hash[:8])
 
-	fmt.Println("Manually bound post data:", post)
-
 	if post.Title == "" || post.Body == "" {
-		fmt.Println("Empty title or body")
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Title and body cannot be empty"})
 	}
 
 	if !rateLimiter.Allow(post.User) {
-		fmt.Println("Rate limit exceeded for user:", post.User)
 		return c.JSON(http.StatusTooManyRequests, map[string]string{"message": "Rate limit exceeded. Maximum 10 posts per hour."})
 	}
 
 	query := `INSERT INTO posts (title, body, "user") VALUES ($1, $2, $3) RETURNING id, title, body, "user"`
 	err = db.Get(&post, query, post.Title, post.Body, post.User)
 	if err != nil {
-		fmt.Println("Database error:", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Error saving post"})
 	}
 
-	fmt.Println("Saved post:", post)
-	return c.Render(http.StatusOK, "post.html", map[string]interface{}{
-		"ID":          post.ID,
-		"Title":       post.Title,
-		"Body":        post.Body,
-		"User":        post.User,
+	// Fetch the updated list of posts
+	var posts []Post
+	err = db.Select(&posts, "SELECT id, title, body, \"user\" FROM posts ORDER BY id DESC")
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Error fetching updated posts"})
+	}
+
+	// Return only the posts list
+	return c.Render(http.StatusOK, "posts_list.html", map[string]interface{}{
+		"Posts":       posts,
 		"CurrentUser": post.User,
 	})
 }
@@ -141,12 +137,10 @@ func updatePost(c echo.Context) error {
 	id := c.Param("id")
 	var post Post
 
-	formData, err := c.FormParams()
+	_, err := c.FormParams()
 	if err != nil {
-		fmt.Println("Error getting form params:", err)
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid form data"})
 	}
-	fmt.Println("Raw form data for update:", formData)
 
 	post.Title = c.FormValue("title")
 	post.Body = c.FormValue("body")
@@ -154,32 +148,36 @@ func updatePost(c echo.Context) error {
 	var existingPost Post
 	err = db.Get(&existingPost, "SELECT \"user\" FROM posts WHERE id = $1", id)
 	if err != nil {
-		fmt.Println("Error getting existing post:", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Error updating post"})
 	}
 	post.User = existingPost.User
 
-	fmt.Println("Manually bound post data for update:", post)
-
 	if post.Title == "" || post.Body == "" {
-		fmt.Println("Empty title or body in update")
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Title and body cannot be empty"})
 	}
 
 	query := `UPDATE posts SET title=$1, body=$2 WHERE id=$3 RETURNING id, title, body, "user"`
 	err = db.Get(&post, query, post.Title, post.Body, id)
 	if err != nil {
-		fmt.Println("Database error during update:", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Error updating post"})
 	}
 
-	fmt.Println("Updated post:", post)
-	return c.Render(http.StatusOK, "post.html", map[string]interface{}{
-		"ID":          post.ID,
-		"Title":       post.Title,
-		"Body":        post.Body,
-		"User":        post.User,
-		"CurrentUser": post.User,
+	// Fetch the updated list of posts
+	var posts []Post
+	err = db.Select(&posts, "SELECT id, title, body, \"user\" FROM posts ORDER BY id DESC")
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Error fetching updated posts"})
+	}
+
+	// Get current user
+	ip := c.RealIP()
+	hash := sha256.Sum256([]byte(ip))
+	currentUser := hex.EncodeToString(hash[:8])
+
+	// Return only the posts list
+	return c.Render(http.StatusOK, "posts_list.html", map[string]interface{}{
+		"Posts":       posts,
+		"CurrentUser": currentUser,
 	})
 }
 
@@ -192,7 +190,23 @@ func deletePost(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Error deleting post"})
 	}
 
-	return c.NoContent(http.StatusOK)
+	// Fetch the updated list of posts
+	var posts []Post
+	err = db.Select(&posts, "SELECT id, title, body, \"user\" FROM posts ORDER BY id DESC")
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Error fetching updated posts"})
+	}
+
+	// Get current user
+	ip := c.RealIP()
+	hash := sha256.Sum256([]byte(ip))
+	currentUser := hex.EncodeToString(hash[:8])
+
+	// Return only the posts list
+	return c.Render(http.StatusOK, "posts_list.html", map[string]interface{}{
+		"Posts":       posts,
+		"CurrentUser": currentUser,
+	})
 }
 
 func getPost(c echo.Context) error {
@@ -219,14 +233,12 @@ func main() {
 	dsn := config.DB_URL
 	db, err = sqlx.Open("postgres", dsn)
 	if err != nil {
-		fmt.Println("Error connecting to the database:", err)
-		return
+		log.Fatal("Error connecting to the database:", err)
 	}
 	defer db.Close()
 
 	if err := db.Ping(); err != nil {
-		fmt.Println("Error pinging the database:", err)
-		return
+		log.Fatal("Error pinging the database:", err)
 	}
 
 	_, err = db.Exec(`
@@ -238,8 +250,7 @@ func main() {
 		);
 	`)
 	if err != nil {
-		fmt.Println("Error creating tables:", err)
-		return
+		log.Fatal("Error creating tables:", err)
 	}
 
 	e := echo.New()
@@ -254,11 +265,7 @@ func main() {
 		var posts []Post
 		err := db.Select(&posts, "SELECT id, title, body, \"user\" FROM posts ORDER BY id DESC")
 		if err != nil {
-
-			fmt.Println("Error fetching posts:", err)
-
 			if err.Error() == "relation \"posts\" does not exist" {
-
 				_, createErr := db.Exec(`
 					CREATE TABLE IF NOT EXISTS posts (
 						id SERIAL PRIMARY KEY,
@@ -268,7 +275,7 @@ func main() {
 					);
 				`)
 				if createErr != nil {
-					fmt.Println("Error creating posts table:", createErr)
+					log.Fatal("Error creating posts table:", createErr)
 				}
 			}
 
